@@ -2,12 +2,11 @@
 pragma solidity ^0.8.22;
 
 import { ONFT721 } from "@layerzerolabs/onft-evm/contracts/onft721/ONFT721.sol";
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import { MessagingFee, Origin } from "@layerzerolabs/oapp-evm/contracts/oapp/OApp.sol";
 import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
 
-contract MyONFT721 is ONFT721, Ownable {
+contract MyONFT721 is ONFT721 {
     uint256 private _tokenIdCounter;
     using OptionsBuilder for bytes;
     bytes options = OptionsBuilder.newOptions().addExecutorLzReceiveOption(200000, 0);
@@ -27,11 +26,7 @@ contract MyONFT721 is ONFT721, Ownable {
         string memory _symbol,
         address _lzEndpoint,
         address _delegate
-    ) ONFT721(_name, _symbol, _lzEndpoint, _delegate) Ownable(_delegate) {}
-
-    function token() external view returns (address) {
-        return address(this);
-    }
+    ) ONFT721(_name, _symbol, _lzEndpoint, _delegate) {}
 
     // Mint a new ONFT and set it as active, associating it with the original NFT contract
     function mint(address to, address originalNFTContract) public onlyOwner {
@@ -101,7 +96,7 @@ contract MyONFT721 is ONFT721, Ownable {
         uint256 batchSize
     ) internal override(ONFT721) {
         require(from == address(0) || to == address(0), "This token is soulbound");
-        super._beforeTokenTransfer(from, to, tokenId, batchSize);
+        // super._beforeTokenTransfer(from, to, tokenId, batchSize);
     }
 
     // Batch minting across multiple chains
@@ -124,22 +119,8 @@ contract MyONFT721 is ONFT721, Ownable {
         }
     }
 
-    // Override supportsInterface to make it compatible with ONFT721
-    function supportsInterface(bytes4 interfaceId) public view override(ONFT721) returns (bool) {
-        return super.supportsInterface(interfaceId);
-    }
-
     function approvalRequired() external pure virtual returns (bool) {
         return false;
-    }
-
-    function _debit(address _from, uint256 _tokenId, uint32 /*_dstEid*/) internal virtual override {
-        if (_from != ERC721.ownerOf(_tokenId)) revert OnlyNFTOwner(_from, ERC721.ownerOf(_tokenId));
-        _burn(_tokenId);
-    }
-
-    function _credit(address _to, uint256 _tokenId, uint32 /*_srcEid*/) internal virtual override {
-        _mint(_to, _tokenId);
     }
 
     function _lzReceive(
