@@ -5,6 +5,7 @@ import { ONFT721 } from "@layerzerolabs/onft-evm/contracts/onft721/ONFT721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import { MessagingFee, Origin } from "@layerzerolabs/oapp-evm/contracts/oapp/OApp.sol";
 import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract MyONFT721 is ONFT721 {
     uint256 private _tokenIdCounter;
@@ -42,6 +43,18 @@ contract MyONFT721 is ONFT721 {
         // Add the user to the community members list
         communityMembers[originalNFTContract].push(to);
         communityCount[originalNFTContract]++;
+    }
+
+    // Batch minting across multiple chains for a single user
+    function batchMint(address to) external payable onlyOwner {
+        // Mint locally for the recipient
+        mint(to);
+
+        // // Send mint request to other chains
+        // bytes memory payload = abi.encode(to);
+        // for (uint256 i = 0; i < dstChainIds.length; i++) {
+        //     _lzSend(dstChainIds[i], payload, options, MessagingFee(msg.value, 0), payable(msg.sender));
+        // }
     }
 
     // Deactivate user's token
@@ -86,18 +99,6 @@ contract MyONFT721 is ONFT721 {
     // Get all members of a community (e.g., holders of BAYC who have minted an ONFT)
     function getCommunityMembers(address originalNFTContract) public view returns (address[] memory) {
         return communityMembers[originalNFTContract];
-    }
-
-    // Batch minting across multiple chains for a single user
-    function batchMint(uint16[] memory dstChainIds, address to) external payable onlyOwner {
-        // Mint locally for the recipient
-        mint(to);
-
-        // Send mint request to other chains
-        bytes memory payload = abi.encode(to);
-        for (uint256 i = 0; i < dstChainIds.length; i++) {
-            _lzSend(dstChainIds[i], payload, options, MessagingFee(msg.value, 0), payable(msg.sender));
-        }
     }
 
     function _lzReceive(Origin calldata, bytes32, bytes calldata payload, address, bytes calldata) internal override {
