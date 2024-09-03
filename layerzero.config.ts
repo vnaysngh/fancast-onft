@@ -5,12 +5,12 @@ import type { OAppEdgeConfig, OAppOmniGraphHardhat, OmniPointHardhat } from '@la
 
 const optimism_sepoliaContract: OmniPointHardhat = {
     eid: EndpointId.OPTSEP_V2_TESTNET,
-    contractName: 'MyOApp',
+    contractName: 'MyONFT721',
 }
 
 const base_sepoliaContract: OmniPointHardhat = {
     eid: EndpointId.BASESEP_V2_TESTNET,
-    contractName: 'MyOApp',
+    contractName: 'MyONFT721',
 }
 const DEFAULT_EDGE_CONFIG: OAppEdgeConfig = {
     enforcedOptions: [

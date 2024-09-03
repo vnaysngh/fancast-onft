@@ -88,48 +88,19 @@ contract MyONFT721 is ONFT721 {
         return communityMembers[originalNFTContract];
     }
 
-    // Overriding _beforeTokenTransfer to make it soulbound
-    function _beforeTokenTransfer(
-        address from,
-        address to,
-        uint256 tokenId,
-        uint256 batchSize
-    ) internal override(ONFT721) {
-        require(from == address(0) || to == address(0), "This token is soulbound");
-        // super._beforeTokenTransfer(from, to, tokenId, batchSize);
-    }
+    // Batch minting across multiple chains for a single user
+    function batchMint(uint16[] memory dstChainIds, address to) external payable onlyOwner {
+        // Mint locally for the recipient
+        mint(to);
 
-    // Batch minting across multiple chains
-    function batchMint(
-        uint16[] memory dstChainIds,
-        address[] memory recipients,
-        address originalNFTContract
-    ) external onlyOwner {
-        require(dstChainIds.length == recipients.length, "Mismatched input lengths");
-
+        // Send mint request to other chains
+        bytes memory payload = abi.encode(to);
         for (uint256 i = 0; i < dstChainIds.length; i++) {
-            if (dstChainIds[i] == uint16(block.chainid)) {
-                // Mint locally if it's the current chain
-                mint(recipients[i], originalNFTContract);
-            } else {
-                // Send mint request to other chains
-                bytes memory payload = abi.encode(recipients[i], originalNFTContract);
-                _lzSend(dstChainIds[i], payload, payable(msg.sender), address(0x0), bytes(""));
-            }
+            _lzSend(dstChainIds[i], payload, options, MessagingFee(msg.value, 0), payable(msg.sender));
         }
     }
 
-    function approvalRequired() external pure virtual returns (bool) {
-        return false;
-    }
-
-    function _lzReceive(
-        Origin calldata,
-        bytes32 _guid,
-        bytes calldata payload,
-        address _executor,
-        bytes calldata _extraData
-    ) internal override {
+    function _lzReceive(Origin calldata, bytes32, bytes calldata payload, address, bytes calldata) internal override {
         (address recipient, address originalNFTContract) = abi.decode(payload, (address, address));
         mint(recipient, originalNFTContract);
     }
