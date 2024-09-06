@@ -33,8 +33,31 @@ contract MyONFT721 is ONFT721 {
         address _delegate
     ) ONFT721(_name, _symbol, _lzEndpoint, _delegate) {}
 
+    // Modified implementation to allow user minting:
+    function mintNFTAndJoinCommunity(address originalNFTContract) public {
+        require(originalNFTContract != address(0), "Invalid community address");
+        require(!hasToken[msg.sender], "User already has an NFT");
+
+        uint256 tokenId = _tokenIdCounter;
+        _tokenIdCounter++;
+        _safeMint(msg.sender, tokenId);
+
+        // Mark that the user now has a token
+        hasToken[msg.sender] = true;
+
+        // Initialize the user info with the first community
+        userInfo[msg.sender] = UserInfo({ tokenId: tokenId, isActive: true, joinedCommunities: new address[](1) });
+        userInfo[msg.sender].joinedCommunities[0] = originalNFTContract;
+
+        // Update community info
+        communityInfo[originalNFTContract].communityMembers.push(msg.sender);
+        communityInfo[originalNFTContract].communityCount++;
+
+        emit NFTMintedAndCommunityJoined(msg.sender, originalNFTContract, tokenId);
+    }
+
     // Function to mint NFT for first-time users and join their first community
-    function mintNFTAndJoinCommunity(address to, address originalNFTContract) public onlyOwner {
+    function ownerMintNFTAndJoinCommunity(address to, address originalNFTContract) public onlyOwner {
         require(to != address(0), "Invalid address");
         require(originalNFTContract != address(0), "Invalid community address");
         require(!hasToken[to], "User already has an NFT");
@@ -62,10 +85,10 @@ contract MyONFT721 is ONFT721 {
     event DataUpdateReceived(uint16 srcChainId);
 
     // Function to update all relevant data across all chains
-    function updateDataAcrossChains(address user, uint32[] memory _dstChainIds) external payable {
-        require(hasToken[user], "User does not have an NFT");
+    function updateDataAcrossChains(uint32[] memory _dstChainIds) external payable {
+        require(hasToken[msg.sender], "User does not have an NFT");
 
-        MessagingFee memory totalFee = quote(user, _dstChainIds);
+        MessagingFee memory totalFee = quote(_dstChainIds);
         require(msg.value >= totalFee.nativeFee, "Insufficient fee provided");
 
         // Prepare the payload with relevant data
@@ -73,14 +96,14 @@ contract MyONFT721 is ONFT721 {
             address[] memory communities,
             uint256[] memory communityCounts,
             address[][] memory communityMembers
-        ) = getRelevantCommunityInfo(user);
+        ) = getRelevantCommunityInfo(msg.sender);
 
         bytes memory payload = abi.encode(
-            user,
-            hasToken[user],
-            userInfo[user].tokenId,
-            userInfo[user].isActive,
-            userInfo[user].joinedCommunities,
+            msg.sender,
+            hasToken[msg.sender],
+            userInfo[msg.sender].tokenId,
+            userInfo[msg.sender].isActive,
+            userInfo[msg.sender].joinedCommunities,
             communities,
             communityCounts,
             communityMembers
@@ -98,7 +121,7 @@ contract MyONFT721 is ONFT721 {
             _lzSend(_dstChainIds[i], payload, options, MessagingFee(fee.nativeFee, 0), payable(msg.sender));
         }
 
-        emit DataUpdateInitiated(user, _dstChainIds);
+        emit DataUpdateInitiated(msg.sender, _dstChainIds);
     }
 
     // Helper function to get relevant community info for a user
@@ -151,22 +174,22 @@ contract MyONFT721 is ONFT721 {
         // emit DataUpdateReceived(_origin.srcChainId);
     }
 
-    function quote(address user, uint32[] memory _dstChainIds) public view returns (MessagingFee memory totalFee) {
-        require(hasToken[user], "User does not have an NFT");
+    function quote(uint32[] memory _dstChainIds) public view returns (MessagingFee memory totalFee) {
+        require(hasToken[msg.sender], "User does not have an NFT");
 
         (
             address[] memory communities,
             uint256[] memory communityCounts,
             address[][] memory communityMembers
-        ) = getRelevantCommunityInfo(user);
+        ) = getRelevantCommunityInfo(msg.sender);
 
         // Prepare the payload with all relevant data
         bytes memory payload = abi.encode(
-            user,
-            hasToken[user],
-            userInfo[user].tokenId,
-            userInfo[user].isActive,
-            userInfo[user].joinedCommunities,
+            msg.sender,
+            hasToken[msg.sender],
+            userInfo[msg.sender].tokenId,
+            userInfo[msg.sender].isActive,
+            userInfo[msg.sender].joinedCommunities,
             communities,
             communityCounts,
             communityMembers
@@ -182,15 +205,15 @@ contract MyONFT721 is ONFT721 {
     }
 
     // Function for existing NFT holders to join additional communities
-    function joinAdditionalCommunity(address to, address originalNFTContract) public onlyOwner {
-        require(to != address(0), "Invalid address");
+    function joinAdditionalCommunity(address originalNFTContract) public onlyOwner {
+        require(msg.sender != address(0), "Invalid address");
         require(originalNFTContract != address(0), "Invalid community address");
-        require(hasToken[to], "User does not have an NFT");
+        require(hasToken[msg.sender], "User does not have an NFT");
 
         // Check if the user has already joined this community
         bool alreadyJoined = false;
-        for (uint256 i = 0; i < userInfo[to].joinedCommunities.length; i++) {
-            if (userInfo[to].joinedCommunities[i] == originalNFTContract) {
+        for (uint256 i = 0; i < userInfo[msg.sender].joinedCommunities.length; i++) {
+            if (userInfo[msg.sender].joinedCommunities[i] == originalNFTContract) {
                 alreadyJoined = true;
                 break;
             }
@@ -198,13 +221,13 @@ contract MyONFT721 is ONFT721 {
         require(!alreadyJoined, "User has already joined this community");
 
         // Add the new community
-        userInfo[to].joinedCommunities.push(originalNFTContract);
+        userInfo[msg.sender].joinedCommunities.push(originalNFTContract);
 
         // Update community info
-        communityInfo[originalNFTContract].communityMembers.push(to);
+        communityInfo[originalNFTContract].communityMembers.push(msg.sender);
         communityInfo[originalNFTContract].communityCount++;
 
-        emit AdditionalCommunityJoined(to, originalNFTContract, userInfo[to].tokenId);
+        emit AdditionalCommunityJoined(msg.sender, originalNFTContract, userInfo[msg.sender].tokenId);
     }
 
     // Events to emit when a user mints an NFT and joins their first community
@@ -214,19 +237,18 @@ contract MyONFT721 is ONFT721 {
     event AdditionalCommunityJoined(address indexed user, address indexed community, uint256 tokenId);
 
     // Deactivate user's token
-    function deactivate(address user) public {
-        require(msg.sender == user || msg.sender == owner(), "Not authorized");
-        require(userInfo[user].tokenId != 0, "User has no token");
+    function deactivate() public {
+        // require(msg.sender == user || msg.sender == owner(), "Not authorized");
+        require(userInfo[msg.sender].tokenId != 0, "User has no token");
 
-        userInfo[user].isActive = false;
+        userInfo[msg.sender].isActive = false;
     }
 
     // Reactivate user's token
-    function reactivate(address user) public {
-        require(msg.sender == user || msg.sender == owner(), "Not authorized");
-        require(userInfo[user].tokenId != 0, "User has no token");
+    function reactivate() public {
+        require(userInfo[msg.sender].tokenId != 0, "User has no token");
 
-        userInfo[user].isActive = true;
+        userInfo[msg.sender].isActive = true;
     }
 
     // Delete user's token and remove them from the community list
