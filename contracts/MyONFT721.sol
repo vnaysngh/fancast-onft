@@ -5,7 +5,6 @@ import { ONFT721 } from "@layerzerolabs/onft-evm/contracts/onft721/ONFT721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import { MessagingFee, Origin } from "@layerzerolabs/oapp-evm/contracts/oapp/OApp.sol";
 import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract MyONFT721 is ONFT721 {
     uint256 private _tokenIdCounter;
@@ -15,12 +14,17 @@ contract MyONFT721 is ONFT721 {
     struct UserInfo {
         uint256 tokenId;
         bool isActive;
-        address originalNFTContract; // Address of the original NFT contract (e.g., BAYC)
+        address[] joinedCommunities; // List of joined communities
     }
 
+    struct CommunityInfo {
+        uint256 communityCount;
+        address[] communityMembers; // List of community members
+    }
+
+    mapping(address => bool) public hasToken;
     mapping(address => UserInfo) public userInfo;
-    mapping(address => address[]) public communityMembers; // Maps an original NFT contract to the list of users holding ONFTs
-    mapping(address => uint256) public communityCount; // Maps an original NFT contract to the count of members
+    mapping(address => CommunityInfo) public communityInfo;
 
     constructor(
         string memory _name,
@@ -29,33 +33,185 @@ contract MyONFT721 is ONFT721 {
         address _delegate
     ) ONFT721(_name, _symbol, _lzEndpoint, _delegate) {}
 
-    // Mint a new ONFT and set it as active, associating it with the original NFT contract
-    function mint(address to, address originalNFTContract) public onlyOwner {
-        require(userInfo[to].tokenId == 0, "User already has a token");
+    // Function to mint NFT for first-time users and join their first community
+    function mintNFTAndJoinCommunity(address to, address originalNFTContract) public onlyOwner {
+        require(to != address(0), "Invalid address");
+        require(originalNFTContract != address(0), "Invalid community address");
+        require(!hasToken[to], "User already has an NFT");
 
         uint256 tokenId = _tokenIdCounter;
         _tokenIdCounter++;
-
         _safeMint(to, tokenId);
 
-        userInfo[to] = UserInfo(tokenId, true, originalNFTContract);
+        // Mark that the user now has a token
+        hasToken[to] = true;
 
-        // Add the user to the community members list
-        communityMembers[originalNFTContract].push(to);
-        communityCount[originalNFTContract]++;
+        // Initialize the user info with the first community
+        userInfo[to] = UserInfo({ tokenId: tokenId, isActive: true, joinedCommunities: new address[](1) });
+        userInfo[to].joinedCommunities[0] = originalNFTContract;
+
+        // Update community info
+        communityInfo[originalNFTContract].communityMembers.push(to);
+        communityInfo[originalNFTContract].communityCount++;
+
+        emit NFTMintedAndCommunityJoined(to, originalNFTContract, tokenId);
     }
 
-    // Batch minting across multiple chains for a single user
-    function batchMint(address to) external payable onlyOwner {
-        // Mint locally for the recipient
-        mint(to);
+    // Events
+    event DataUpdateInitiated(address indexed initiator, uint32[] destinationChainIds);
+    event DataUpdateReceived(uint16 srcChainId);
 
-        // // Send mint request to other chains
-        // bytes memory payload = abi.encode(to);
-        // for (uint256 i = 0; i < dstChainIds.length; i++) {
-        //     _lzSend(dstChainIds[i], payload, options, MessagingFee(msg.value, 0), payable(msg.sender));
-        // }
+    // Function to update all relevant data across all chains
+    function updateDataAcrossChains(address user, uint32[] memory _dstChainIds) external payable {
+        require(hasToken[user], "User does not have an NFT");
+
+        MessagingFee memory totalFee = quote(user, _dstChainIds);
+        require(msg.value >= totalFee.nativeFee, "Insufficient fee provided");
+
+        // Prepare the payload with relevant data
+        (
+            address[] memory communities,
+            uint256[] memory communityCounts,
+            address[][] memory communityMembers
+        ) = getRelevantCommunityInfo(user);
+
+        bytes memory payload = abi.encode(
+            user,
+            hasToken[user],
+            userInfo[user].tokenId,
+            userInfo[user].isActive,
+            userInfo[user].joinedCommunities,
+            communities,
+            communityCounts,
+            communityMembers
+        );
+
+        uint256 totalNativeFeeUsed = 0;
+        uint256 remainingValue = msg.value;
+
+        for (uint i = 0; i < _dstChainIds.length; i++) {
+            MessagingFee memory fee = _quote(_dstChainIds[i], payload, options, false);
+            totalNativeFeeUsed += fee.nativeFee;
+            remainingValue -= fee.nativeFee;
+            require(remainingValue >= 0, "Insufficient fee for this destination");
+
+            _lzSend(_dstChainIds[i], payload, options, MessagingFee(fee.nativeFee, 0), payable(msg.sender));
+        }
+
+        emit DataUpdateInitiated(user, _dstChainIds);
     }
+
+    // Helper function to get relevant community info for a user
+    function getRelevantCommunityInfo(
+        address user
+    )
+        internal
+        view
+        returns (address[] memory communities, uint256[] memory communityCounts, address[][] memory communityMembers)
+    {
+        communities = userInfo[user].joinedCommunities;
+        communityCounts = new uint256[](communities.length);
+        communityMembers = new address[][](communities.length);
+
+        for (uint i = 0; i < communities.length; i++) {
+            communityCounts[i] = communityInfo[communities[i]].communityCount;
+            communityMembers[i] = communityInfo[communities[i]].communityMembers;
+        }
+
+        return (communities, communityCounts, communityMembers);
+    }
+
+    // Function to receive and process the data update on the destination chain
+    function _lzReceive(Origin calldata, bytes32, bytes calldata _payload, address, bytes calldata) internal override {
+        (
+            address user,
+            bool _hasToken,
+            uint256 tokenId,
+            bool isActive,
+            address[] memory joinedCommunities,
+            address[] memory communities,
+            uint256[] memory communityCounts,
+            address[][] memory communityMembers
+        ) = abi.decode(_payload, (address, bool, uint256, bool, address[], address[], uint256[], address[][]));
+
+        // Update hasToken
+        hasToken[user] = _hasToken;
+
+        // Update userInfo
+        userInfo[user].tokenId = tokenId;
+        userInfo[user].isActive = isActive;
+        userInfo[user].joinedCommunities = joinedCommunities;
+
+        // Update communityInfo
+        for (uint i = 0; i < communities.length; i++) {
+            communityInfo[communities[i]].communityCount = communityCounts[i];
+            communityInfo[communities[i]].communityMembers = communityMembers[i];
+        }
+
+        // emit DataUpdateReceived(_origin.srcChainId);
+    }
+
+    function quote(address user, uint32[] memory _dstChainIds) public view returns (MessagingFee memory totalFee) {
+        require(hasToken[user], "User does not have an NFT");
+
+        (
+            address[] memory communities,
+            uint256[] memory communityCounts,
+            address[][] memory communityMembers
+        ) = getRelevantCommunityInfo(user);
+
+        // Prepare the payload with all relevant data
+        bytes memory payload = abi.encode(
+            user,
+            hasToken[user],
+            userInfo[user].tokenId,
+            userInfo[user].isActive,
+            userInfo[user].joinedCommunities,
+            communities,
+            communityCounts,
+            communityMembers
+        );
+
+        for (uint i = 0; i < _dstChainIds.length; i++) {
+            MessagingFee memory fee = _quote(_dstChainIds[i], payload, options, false);
+            totalFee.nativeFee += fee.nativeFee;
+            totalFee.lzTokenFee += fee.lzTokenFee;
+        }
+
+        return totalFee;
+    }
+
+    // Function for existing NFT holders to join additional communities
+    function joinAdditionalCommunity(address to, address originalNFTContract) public onlyOwner {
+        require(to != address(0), "Invalid address");
+        require(originalNFTContract != address(0), "Invalid community address");
+        require(hasToken[to], "User does not have an NFT");
+
+        // Check if the user has already joined this community
+        bool alreadyJoined = false;
+        for (uint256 i = 0; i < userInfo[to].joinedCommunities.length; i++) {
+            if (userInfo[to].joinedCommunities[i] == originalNFTContract) {
+                alreadyJoined = true;
+                break;
+            }
+        }
+        require(!alreadyJoined, "User has already joined this community");
+
+        // Add the new community
+        userInfo[to].joinedCommunities.push(originalNFTContract);
+
+        // Update community info
+        communityInfo[originalNFTContract].communityMembers.push(to);
+        communityInfo[originalNFTContract].communityCount++;
+
+        emit AdditionalCommunityJoined(to, originalNFTContract, userInfo[to].tokenId);
+    }
+
+    // Events to emit when a user mints an NFT and joins their first community
+    event NFTMintedAndCommunityJoined(address indexed user, address indexed community, uint256 tokenId);
+
+    // Event to emit when an existing NFT holder joins an additional community
+    event AdditionalCommunityJoined(address indexed user, address indexed community, uint256 tokenId);
 
     // Deactivate user's token
     function deactivate(address user) public {
@@ -78,43 +234,40 @@ contract MyONFT721 is ONFT721 {
         require(userInfo[user].tokenId != 0, "User has no token");
 
         uint256 tokenId = userInfo[user].tokenId;
-        address originalNFTContract = userInfo[user].originalNFTContract;
+        address[] memory joinedCommunities = userInfo[user].joinedCommunities;
 
         _burn(tokenId);
 
-        // Remove user from communityMembers list
-        address[] storage members = communityMembers[originalNFTContract];
-        for (uint256 i = 0; i < members.length; i++) {
-            if (members[i] == user) {
-                members[i] = members[members.length - 1];
-                members.pop();
-                communityCount[originalNFTContract]--;
-                break;
+        // Remove user from all joined communities
+        for (uint256 i = 0; i < joinedCommunities.length; i++) {
+            address community = joinedCommunities[i];
+            address[] storage members = communityInfo[community].communityMembers;
+            for (uint256 j = 0; j < members.length; j++) {
+                if (members[j] == user) {
+                    members[j] = members[members.length - 1];
+                    members.pop();
+                    communityInfo[community].communityCount--;
+                    break;
+                }
             }
         }
 
         delete userInfo[user];
+        hasToken[user] = false;
     }
 
-    // Get all members of a community (e.g., holders of BAYC who have minted an ONFT)
+    // Get all members of a community
     function getCommunityMembers(address originalNFTContract) public view returns (address[] memory) {
-        return communityMembers[originalNFTContract];
+        return communityInfo[originalNFTContract].communityMembers;
     }
 
-    function _lzReceive(Origin calldata, bytes32, bytes calldata payload, address, bytes calldata) internal override {
-        (address recipient, address originalNFTContract) = abi.decode(payload, (address, address));
-        mint(recipient, originalNFTContract);
+    // Get user info, including joined communities
+    function getUserInfo(address user) public view returns (UserInfo memory) {
+        return userInfo[user];
     }
 
-    function quote(address to, uint32[] memory _dstChainIds) public view returns (MessagingFee memory totalFee) {
-        bytes memory payload = abi.encode(to);
-
-        for (uint i = 0; i < _dstChainIds.length; i++) {
-            MessagingFee memory fee = _quote(_dstChainIds[i], payload, options, false);
-            totalFee.nativeFee += fee.nativeFee;
-            totalFee.lzTokenFee += fee.lzTokenFee;
-        }
-
-        return totalFee;
+    // Get community count for a specific community
+    function getCommunityCount(address originalNFTContract) public view returns (uint256) {
+        return communityInfo[originalNFTContract].communityCount;
     }
 }
