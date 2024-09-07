@@ -5,17 +5,23 @@ import { ONFT721 } from "@layerzerolabs/onft-evm/contracts/onft721/ONFT721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import { MessagingFee, Origin } from "@layerzerolabs/oapp-evm/contracts/oapp/OApp.sol";
 import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
+import { ISP } from "@ethsign/sign-protocol-evm/src/interfaces/ISP.sol";
+import { Attestation } from "@ethsign/sign-protocol-evm/src/models/Attestation.sol";
+import { DataLocation } from "@ethsign/sign-protocol-evm/src/models/DataLocation.sol";
 
 contract MyONFT721 is ONFT721 {
     uint256 private _tokenIdCounter;
     using OptionsBuilder for bytes;
     bytes options = OptionsBuilder.newOptions().addExecutorLzReceiveOption(200000, 0);
 
+    ISP public spInstance;
+    uint64 public schemaId;
+
     struct UserInfo {
         uint256 tokenId;
         bool isActive;
         address[] joinedCommunities; // List of joined communities
-        string attestationId;
+        uint64 attestationId;
     }
 
     struct CommunityInfo {
@@ -34,8 +40,42 @@ contract MyONFT721 is ONFT721 {
         address _delegate
     ) ONFT721(_name, _symbol, _lzEndpoint, _delegate) {}
 
+    function setSPInstance(address instance) external onlyOwner {
+        spInstance = ISP(instance);
+    }
+
+    // New function to create attestation
+    function createAttestation(bytes memory data) public {
+        // require(hasToken[msg.sender], "User does not have an NFT");
+
+        bytes[] memory recipients = new bytes[](1);
+        recipients[0] = abi.encode(msg.sender);
+
+        Attestation memory a = Attestation({
+            schemaId: schemaId,
+            linkedAttestationId: 0,
+            attestTimestamp: 0,
+            revokeTimestamp: 0,
+            attester: address(this),
+            validUntil: 0,
+            dataLocation: DataLocation.ONCHAIN,
+            revoked: false,
+            recipients: recipients,
+            data: data // SignScan assumes this is from `abi.encode(...)`
+        });
+
+        uint64 attestationId = spInstance.attest(a, "", "", "");
+        userInfo[msg.sender].attestationId = attestationId;
+
+        // emit AttestationCreated(msg.sender, string(abi.encodePacked(attestationId)));
+    }
+
+    function setSchemaID(uint64 schemaId_) external onlyOwner {
+        schemaId = schemaId_;
+    }
+
     // Modified implementation to allow user minting:
-    function mintNFTAndJoinCommunity(address originalNFTContract, string memory _attestationId) public {
+    function mintNFTAndJoinCommunity(address originalNFTContract) public {
         require(originalNFTContract != address(0), "Invalid community address");
         require(!hasToken[msg.sender], "User already has an NFT");
 
@@ -51,7 +91,7 @@ contract MyONFT721 is ONFT721 {
             tokenId: tokenId,
             isActive: true,
             joinedCommunities: new address[](1),
-            attestationId: _attestationId
+            attestationId: 0
         });
         userInfo[msg.sender].joinedCommunities[0] = originalNFTContract;
 
@@ -63,11 +103,7 @@ contract MyONFT721 is ONFT721 {
     }
 
     // Function to mint NFT for first-time users and join their first community
-    function ownerMintNFTAndJoinCommunity(
-        address to,
-        address originalNFTContract,
-        string memory _attestationId
-    ) public onlyOwner {
+    function ownerMintNFTAndJoinCommunity(address to, address originalNFTContract) public onlyOwner {
         require(to != address(0), "Invalid address");
         require(originalNFTContract != address(0), "Invalid community address");
         require(!hasToken[to], "User already has an NFT");
@@ -84,7 +120,7 @@ contract MyONFT721 is ONFT721 {
             tokenId: tokenId,
             isActive: true,
             joinedCommunities: new address[](1),
-            attestationId: _attestationId
+            attestationId: 0
         });
         userInfo[to].joinedCommunities[0] = originalNFTContract;
 
@@ -167,12 +203,12 @@ contract MyONFT721 is ONFT721 {
             bool _hasToken,
             uint256 tokenId,
             bool isActive,
-            string memory _attestationId,
+            uint64 _attestationId,
             address[] memory joinedCommunities,
             address[] memory communities,
             uint256[] memory communityCounts,
             address[][] memory communityMembers
-        ) = abi.decode(_payload, (address, bool, uint256, bool, string, address[], address[], uint256[], address[][]));
+        ) = abi.decode(_payload, (address, bool, uint256, bool, uint64, address[], address[], uint256[], address[][]));
 
         // Update hasToken
         hasToken[user] = _hasToken;
