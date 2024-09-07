@@ -64,8 +64,9 @@ contract MyONFT721 is ONFT721 {
             data: data // SignScan assumes this is from `abi.encode(...)`
         });
 
-        uint64 attestationId = spInstance.attest(a, "", "", "");
-        userInfo[msg.sender].attestationId = attestationId;
+        uint64 _attestationId = spInstance.attest(a, "", "", "");
+        require(_attestationId != 0, "Attestation ID is zero"); // Add this check
+        userInfo[msg.sender].attestationId = _attestationId;
 
         // emit AttestationCreated(msg.sender, string(abi.encodePacked(attestationId)));
     }
