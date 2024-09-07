@@ -15,6 +15,7 @@ contract MyONFT721 is ONFT721 {
         uint256 tokenId;
         bool isActive;
         address[] joinedCommunities; // List of joined communities
+        string attestationId;
     }
 
     struct CommunityInfo {
@@ -34,7 +35,7 @@ contract MyONFT721 is ONFT721 {
     ) ONFT721(_name, _symbol, _lzEndpoint, _delegate) {}
 
     // Modified implementation to allow user minting:
-    function mintNFTAndJoinCommunity(address originalNFTContract) public {
+    function mintNFTAndJoinCommunity(address originalNFTContract, string memory _attestationId) public {
         require(originalNFTContract != address(0), "Invalid community address");
         require(!hasToken[msg.sender], "User already has an NFT");
 
@@ -46,7 +47,12 @@ contract MyONFT721 is ONFT721 {
         hasToken[msg.sender] = true;
 
         // Initialize the user info with the first community
-        userInfo[msg.sender] = UserInfo({ tokenId: tokenId, isActive: true, joinedCommunities: new address[](1) });
+        userInfo[msg.sender] = UserInfo({
+            tokenId: tokenId,
+            isActive: true,
+            joinedCommunities: new address[](1),
+            attestationId: _attestationId
+        });
         userInfo[msg.sender].joinedCommunities[0] = originalNFTContract;
 
         // Update community info
@@ -57,7 +63,11 @@ contract MyONFT721 is ONFT721 {
     }
 
     // Function to mint NFT for first-time users and join their first community
-    function ownerMintNFTAndJoinCommunity(address to, address originalNFTContract) public onlyOwner {
+    function ownerMintNFTAndJoinCommunity(
+        address to,
+        address originalNFTContract,
+        string memory _attestationId
+    ) public onlyOwner {
         require(to != address(0), "Invalid address");
         require(originalNFTContract != address(0), "Invalid community address");
         require(!hasToken[to], "User already has an NFT");
@@ -70,7 +80,12 @@ contract MyONFT721 is ONFT721 {
         hasToken[to] = true;
 
         // Initialize the user info with the first community
-        userInfo[to] = UserInfo({ tokenId: tokenId, isActive: true, joinedCommunities: new address[](1) });
+        userInfo[to] = UserInfo({
+            tokenId: tokenId,
+            isActive: true,
+            joinedCommunities: new address[](1),
+            attestationId: _attestationId
+        });
         userInfo[to].joinedCommunities[0] = originalNFTContract;
 
         // Update community info
@@ -104,6 +119,7 @@ contract MyONFT721 is ONFT721 {
             userInfo[msg.sender].tokenId,
             userInfo[msg.sender].isActive,
             userInfo[msg.sender].joinedCommunities,
+            userInfo[msg.sender].attestationId,
             communities,
             communityCounts,
             communityMembers
@@ -151,11 +167,12 @@ contract MyONFT721 is ONFT721 {
             bool _hasToken,
             uint256 tokenId,
             bool isActive,
+            string memory _attestationId,
             address[] memory joinedCommunities,
             address[] memory communities,
             uint256[] memory communityCounts,
             address[][] memory communityMembers
-        ) = abi.decode(_payload, (address, bool, uint256, bool, address[], address[], uint256[], address[][]));
+        ) = abi.decode(_payload, (address, bool, uint256, bool, string, address[], address[], uint256[], address[][]));
 
         // Update hasToken
         hasToken[user] = _hasToken;
@@ -164,6 +181,7 @@ contract MyONFT721 is ONFT721 {
         userInfo[user].tokenId = tokenId;
         userInfo[user].isActive = isActive;
         userInfo[user].joinedCommunities = joinedCommunities;
+        userInfo[user].attestationId = _attestationId;
 
         // Update communityInfo
         for (uint i = 0; i < communities.length; i++) {
@@ -176,6 +194,7 @@ contract MyONFT721 is ONFT721 {
 
     function quote(uint32[] memory _dstChainIds) public view returns (MessagingFee memory totalFee) {
         require(hasToken[msg.sender], "User does not have an NFT");
+        require(_dstChainIds.length > 0, "No destination chains provided");
 
         (
             address[] memory communities,
@@ -183,7 +202,6 @@ contract MyONFT721 is ONFT721 {
             address[][] memory communityMembers
         ) = getRelevantCommunityInfo(msg.sender);
 
-        // Prepare the payload with all relevant data
         bytes memory payload = abi.encode(
             msg.sender,
             hasToken[msg.sender],
@@ -197,10 +215,12 @@ contract MyONFT721 is ONFT721 {
 
         for (uint i = 0; i < _dstChainIds.length; i++) {
             MessagingFee memory fee = _quote(_dstChainIds[i], payload, options, false);
+            require(fee.nativeFee > 0 || fee.lzTokenFee > 0, "Invalid fee returned from _quote");
             totalFee.nativeFee += fee.nativeFee;
             totalFee.lzTokenFee += fee.lzTokenFee;
         }
 
+        require(totalFee.nativeFee > 0 || totalFee.lzTokenFee > 0, "Total fee is zero");
         return totalFee;
     }
 

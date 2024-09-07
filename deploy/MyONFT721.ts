@@ -37,7 +37,7 @@ const deploy: DeployFunction = async (hre) => {
         from: deployer,
         args: [
             'MyONFT721', // name
-            'ONFT', // symbol
+            'FC', // symbol
             endpointV2Deployment.address, // LayerZero's EndpointV2 address
             deployer, // owner
         ],
