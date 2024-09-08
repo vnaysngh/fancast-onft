@@ -100,7 +100,7 @@ contract MyONFT721 is ONFT721 {
         communityInfo[originalNFTContract].communityMembers.push(msg.sender);
         communityInfo[originalNFTContract].communityCount++;
 
-        emit NFTMintedAndCommunityJoined(msg.sender, originalNFTContract, tokenId);
+        // emit NFTMintedAndCommunityJoined(msg.sender, originalNFTContract, tokenId);
     }
 
     // Function to mint NFT for first-time users and join their first community
@@ -129,7 +129,7 @@ contract MyONFT721 is ONFT721 {
         communityInfo[originalNFTContract].communityMembers.push(to);
         communityInfo[originalNFTContract].communityCount++;
 
-        emit NFTMintedAndCommunityJoined(to, originalNFTContract, tokenId);
+        // emit NFTMintedAndCommunityJoined(to, originalNFTContract, tokenId);
     }
 
     // Events
@@ -174,7 +174,7 @@ contract MyONFT721 is ONFT721 {
             _lzSend(_dstChainIds[i], payload, options, MessagingFee(fee.nativeFee, 0), payable(msg.sender));
         }
 
-        emit DataUpdateInitiated(msg.sender, _dstChainIds);
+        // emit DataUpdateInitiated(msg.sender, _dstChainIds);
     }
 
     // Helper function to get relevant community info for a user
@@ -265,7 +265,7 @@ contract MyONFT721 is ONFT721 {
     function joinAdditionalCommunity(address originalNFTContract) public onlyOwner {
         require(msg.sender != address(0), "Invalid address");
         require(originalNFTContract != address(0), "Invalid community address");
-        require(hasToken[msg.sender], "User does not have an NFT");
+        // require(hasToken[msg.sender], "User does not have an NFT");
 
         // Check if the user has already joined this community
         bool alreadyJoined = false;
@@ -283,8 +283,6 @@ contract MyONFT721 is ONFT721 {
         // Update community info
         communityInfo[originalNFTContract].communityMembers.push(msg.sender);
         communityInfo[originalNFTContract].communityCount++;
-
-        emit AdditionalCommunityJoined(msg.sender, originalNFTContract, userInfo[msg.sender].tokenId);
     }
 
     // Events to emit when a user mints an NFT and joins their first community
